@@ -4,15 +4,15 @@ import picos as pic
 #qubit Hamiltonian
 H_1 = [1,2]
 #higher-dim system Hamiltonian
-H_2 = [1,2.5,3.6]
+H_2 = [1,2,3]
 #dimension of higher-dim system
 dim_2 = len(H_2)
 #total Hamiltonian
 H_total = [x - H_1[0] for x in H_2] + [x - H_1[1] for x in H_2]
 
 #setting up qubit basis states
-zero2 = pic.new_param('zero2', np.array([[1.,0.],[0.,0.]]))    # |0X0|
-one2  = pic.new_param('one2', np.array([[0.,0.],[0.,1.]]))# |1X1|
+zero2 = pic.diag([1,0]) # |0X0|
+one2  = pic.diag([0,1])# |1X1|
 qubit = [zero2,one2]
 
 #Setting up qutrit basis states
