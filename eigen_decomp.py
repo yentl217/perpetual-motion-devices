@@ -4,7 +4,7 @@ import picos as pic
 #qubit Hamiltonian
 H_1 = [1,2]
 #higher-dim system Hamiltonian
-H_2 = [1,2,3]
+H_2 = [1,2.5,3.6]
 #dimension of higher-dim system
 dim_2 = len(H_2)
 #total Hamiltonian
@@ -21,7 +21,7 @@ one3 = pic.diag([0,1,0])
 two3 = pic.diag([0,0,1])
 qutrit = [zero3,one3,two3]
 
-#initialise dictionary of projectors onto total energy eigenspaces, indexed by total energy
+#initialise dictionary of projectors onto total energy eigenspaces, indexed by total energy (qubit goes first)
 projectors = dict()
 #initalise list of unique energies
 uniq_e = list()
