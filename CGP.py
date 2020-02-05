@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 Created on Sun Jan 19 19:41:12 2020
-
 @author: rheaa
 note need CVXOPT ver >=1.2.3 installed (\w 1.2.0 'hermitian' requirement seemed to fuck things up)
 """
+#Would be good to have some outputs on where in the program we are.
+#What's the number at the top of the graph?
+
 import numpy as np
 #from scipy import optimize
 #import scipy
-import picos as pic
+import picos as pic #SDP solver
 #import cvxopt as cvx
 #from pprint import pprint
 import matplotlib.pyplot as plt
@@ -23,6 +25,7 @@ Z =  pic.new_param('Z', np.array([[1.,0.],[0.,-1.]]))        # pauli Z
 Y = pic.new_param('X', np.array([[0.,-1j],[1j,0.]]))         # pauli Y
 
 ### def Gibbs state ### 
+#previous labelled gamma; relabelled to gibbs to avoid confusion with Gamma map
 b = 1  # inverse temp
 E0 = 0
 E1 = 1 # energy level spacing
@@ -30,18 +33,20 @@ def g(x):
     return np.exp(-b * x)
 g0= g(E0)/(g(E0)+ g(E1))
 g1= g(E1)/(g(E0)+ g(E1))
-gamma = pic.new_param('gamma', np.array([[g0,0.],[0.,g1]])) 
+gibbs = pic.new_param('gibbs', np.array([[g0,0.],[0.,g1]])) 
 
 ### dephasing map ###
 def dephase(M):
     return pic.diag(pic.diag_vect(M)) 
 
 ### Gibbs-preserving covariant constraint fn ###
-def Gamma_GPC(a0,a1,a2,a3,rho1,gamma1):
-    return pic.kron(I,a1) - dephase(pic.kron(a2,rho1)) - pic.kron(a3,gamma1) - a0
+#Note the Gibbs-twirling is incorrectly implemented in Gamma_GPC, as energy dephasing in the energy eigenbases of the individual systems! So Gamma_GPC doesn't work here.
+#This is the equation 123 version of the SDP
+def Gamma_GPC(a0,a1,a2,a3,rho1,gibbs1):
+    return pic.kron(I,a1) - dephase(pic.kron(a2,rho1)) - pic.kron(a3,gibbs1) - a0
 ### Gibbs-preserving constraint fn ###
-def Gamma_GP(a0,a1,a2,a3,rho1,gamma1):
-    return pic.kron(I,a1) - pic.kron(a2,rho1) - pic.kron(a3,gamma1) - a0
+def Gamma_GP(a0,a1,a2,a3,rho1,gibbs1):
+    return pic.kron(I,a1) - pic.kron(a2,rho1) - pic.kron(a3,gibbs1) - a0
 
 def f(rho1, sigma1):
     """ rho -> sigma under GPC map? Output \approx 1 --> yes, output<1 --> no.  
@@ -49,42 +54,49 @@ def f(rho1, sigma1):
         
     ## def problem & variables ##
     p = pic.Problem()  
-    X0 = p.add_variable('X0', (4,4), 'hermitian') 
-    X1 = p.add_variable('X1', (2,2), 'hermitian') 
-    X2 = p.add_variable('X2', (2,2), 'hermitian')
-    X3 = p.add_variable('X3', (2,2), 'hermitian')
+    # this is the zeta vector
+    X0 = p.add_variable('X0', (4,4), 'hermitian') #eta
+    X1 = p.add_variable('X1', (2,2), 'hermitian') #Z
+    X2 = p.add_variable('X2', (2,2), 'hermitian') #rho 
+    X3 = p.add_variable('X3', (2,2), 'hermitian') #gibbs
+    
     ## constraints ##
-    paulis = [I,X,Y,Z]    
+    paulis = [I,X,Y,Z] 
+    # this is the constraint Gamma(zeta) = 0; must also be doable just by setting each matrix element to 0...
     for i in range(4):
         for k in range(4):
             basis_ik = pic.kron(paulis[i], paulis[k])
-            p.add_constraint(pic.trace(basis_ik*Gamma_GPC(X0,X1,X2,X3,rho1,gamma))==0)
+            p.add_constraint(pic.trace(basis_ik*Gamma_GPC(X0,X1,X2,X3,rho1,gibbs))==0)
    ### equivalently, can get rid of X0 variable and just use the following (removing dephase for GP): 
-   #p.add_constraint(pic.kron(id_d, X1) - dephase(pic.kron(X2, rho)) - pic.kron(X3, gamma) >> 0. )         
+   #p.add_constraint(pic.kron(id_d, X1) - dephase(pic.kron(X2, rho)) - pic.kron(X3, gibbs) >> 0. ) but this is much slower.
+   #constraint on the positivity of eta
     p.add_constraint(X0 >> 0) 
     p.add_constraint(X1 >> 0) 
     p.add_constraint(X2 >> 0) 
-    p.add_constraint(X3 >> 0)     
-    p.add_constraint((sigma1|X2)+(gamma|X3)==1) 
+    p.add_constraint(X3 >> 0) 
+   #Tr(sigma zeta) = 1
+    p.add_constraint((sigma1|X2)+(gibbs|X3)==1) 
     ## objective fn & solve ## 
     p.set_objective('min', pic.trace(X1))
     p.solve(verbose = 0,solver = 'cvxopt')   
     return p.obj_value().real
 
-def sig(thetaa, ppp):
-    """ sig(t,p) = p |tXt| + (1-p) |t_barXt_bar|
-        |t> = cos t/2 |0> + sin t/2 |1>, <t|t_bar>=0"""
-    if abs(thetaa - np.pi)< 0.000000001:
-        return 0.5 * (I - (2*ppp-1)*Z)
+def sig(theta, p):
+    """ sig(theta,p) = p |thetaXtheta| + (1-p) |theta_barXtheta_bar|
+        |theta> = cos theta/2 |0> + sin theta/2 |1>, <theta|theta_bar>=0"""
+    #Why's this bit necessary?
+    if abs(theta - np.pi)< 0.000000001:
+        return 0.5 * (I - (2*p-1)*Z)
     else:
-        return 0.5 * (I + np.cos(thetaa)*(2*ppp-1)*Z + np.sin(thetaa)*(2*ppp-1)*X)
+        return 0.5 * (I + np.cos(theta)*(2*p-1)*Z + np.sin(theta)*(2*p-1)*X)
 
 ### def initial state rho ### 
+#Would be good to have this as program inputs
 ttt= 0.5
 prob= 0.8
 rho = sig(ttt* np.pi, prob)
 
-### Generate some data + comparison to L1 norm conditions### 
+### Generate some data + comparison to L1 norm conditions (for qubits) ### 
 x1 = []
 z1=[]
 l1=[]
@@ -101,15 +113,16 @@ for i in range(0,h+1):
         p = j / h
         t_list=[]
         for q in range(1,m+1):
-            PP = np.matrix(((q/m)*rho-(1-(q/m))*gamma).value)
-            QQ = np.matrix(((q/m)*sig(t,p)-(1-(q/m))*gamma).value)
-            L1_rho_gam = sum(np.linalg.svd(PP)[1])  #L1-norm of p1 rho - p2 gamma
-            L1_sig_gam = sum(np.linalg.svd(QQ)[1])  #L1-norm of p1 sig - p2 gamma
+            PP = np.matrix(((q/m)*rho-(1-(q/m))*gibbs).value)
+            QQ = np.matrix(((q/m)*sig(t,p)-(1-(q/m))*gibbs).value)
+            L1_rho_gam = sum(np.linalg.svd(PP)[1])  #L1-norm of p1 rho - p2 gibbs
+            L1_sig_gam = sum(np.linalg.svd(QQ)[1])  #L1-norm of p1 sig - p2 gibbs
             t_list.append(L1_rho_gam/L1_sig_gam)
+        #should the L_1 norm threshold here be different frm the f(rho,sig) one?
         if all(i >= 0.999999 for i in t_list):
             x1.append(np.sin(t)*(2*p-1))
             z1.append(np.cos(t)*(2*p-1))
-            l1.append(1.0)    
+            l1.append(1.0) #what does this do? I suspect there is = if conversion is possible...   
         if f(rho, sig(t,p)) >= threshold:  
             x.append(np.sin(t)*(2*p-1))
             z.append(np.cos(t)*(2*p-1))
@@ -117,22 +130,32 @@ for i in range(0,h+1):
 
 ### plot results ###
 
+#sets up grid plot
 xx = np.linspace(-1.0, 1.0, 100)
 yy = np.linspace(-1.0, 1.0, 100)
 XX, YY = np.meshgrid(xx,yy)
+#This defines X-Z circle of Bloch sphere
 F = XX**2 + YY**2 - 1.0
 
 fig = plt.figure()  
 fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, sharex=True, figsize=(5.8,2))
 
+#Draws X-Z cirle of Bloch sphere
 ax1.contour(XX,YY,F,0, colors='k', linewidths=0.5)
+#Plots accessible sigma according to analytic solution
 ax1.scatter(x1,z1,1,c=l1,alpha=1, cmap="coolwarm")
+#plots initial state
 ax1.plot(np.sin(np.pi*ttt)*(2*prob-1), np.cos(np.pi*ttt)*(2*prob-1), marker='o',  markersize=5, color='black')
+#plots Gibbs state
 ax1.plot(0, 2*g0-1, marker='o',  markersize=5, color='gray')
 
+#Draws X-Z circle of Bloch sphere
 ax2.contour(XX,YY,F,0, colors='k', linewidths=0.5)
+#Plots accessible sigma according to SDP
 sc=ax2.scatter(x,z,1,c=n,alpha=1, cmap="coolwarm")
+#Plots initial state
 ax2.plot(np.sin(np.pi*ttt)*(2*prob-1), np.cos(np.pi*ttt)*(2*prob-1), marker='o',  markersize=5, color='black')
+#Plots Gibbs state
 ax2.plot(0, 2*g0-1, marker='o',  markersize=5, color='gray')
 
 # get rid of top/right border 
@@ -159,7 +182,6 @@ axes = plt.gca()
 axes.set_xlim([-1.25,1.25])
 axes.set_ylim([-1.25,1.25])
 
-
 # colourbar 
 fig.subplots_adjust(right=0.79,bottom=0.2)
 cbar_ax = fig.add_axes([0.85, 0.2, 0.023, 0.67])
@@ -177,12 +199,9 @@ plt.colorbar();
 plt.plot(2*q-1, 0, marker='o',  markersize=5, color='black')
 plt.plot(0, 2*g1-1, marker='o',  markersize=5, color='black')
 ax = plt.subplot(1, 1, 1)
-
 fig.savefig("bloch.png", dpi=800)
-
 np.savetxt('data_bloch.out', (x,z,n)) 
 np.savetxt('data_bloch_l1.out', (x1,z1,l1)) 
-
 fig=plt.figure(figsize=(7,5)) 
 plt.scatter(x1,z1,1,c=l1,alpha=3, cmap="coolwarm")
 plt.colorbar();
@@ -190,5 +209,4 @@ plt.plot(2*q-1, 0, marker='o',  markersize=5, color='black')
 plt.plot(0, 2*g1-1, marker='o',  markersize=5, color='black')
 ax = plt.subplot(1, 1, 1)
 fig.savefig("bloch_l1.png", dpi=800)
-
 """
