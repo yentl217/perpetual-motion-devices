@@ -5,34 +5,36 @@ Created on Sun Jan 19 19:41:12 2020
 @author: rheaa
 note need CVXOPT ver >=1.2.3 installed (\w 1.2.0 'hermitian' requirement seemed to fuck things up)
 """
-import numpy as np
-#from scipy import optimize
-#import scipy
-import picos as pic
-#import cvxopt as cvx
-#from pprint import pprint
-import matplotlib.pyplot as plt
-#import math
 
+#TODO: add dimension as input
+#NOTE: at this time we are just looking at ladder systems, so Aberg's results apply.
+
+import numpy as np
+#This is the SDP solver
+import picos as pic
+import matplotlib.pyplot as plt
+
+#setting up some useful qubit states
 plus2 = pic.new_param('plus2', np.array([[.5,.5],[.5,.5]]))    # |+X+|
 minus2 = pic.new_param('minus2', np.array([[.5,-.5],[-.5,.5]])) # |-X-|
 zero2 = pic.new_param('zero2', np.array([[1.,0.],[0.,0.]]))    # |0X0|
 one2  = pic.new_param('one2', np.array([[0.,0.],[0.,1.]]))     # |1X1|
-I2 = pic.new_param('I2',np.eye(2))                             # id
+I2 = pic.new_param('I2',np.eye(2))                             # Identity
 X = pic.new_param('X', np.array([[0.,1.],[1.,0.]]))          # pauli X
 Z =  pic.new_param('Z', np.array([[1.,0.],[0.,-1.]]))        # pauli Z
 Y = pic.new_param('Y', np.array([[0.,-1j],[1j,0.]]))         # pauli Y
+
+#Setting up qutrit basis states
 zero3 = pic.diag([1,0,0])
 one3 = pic.diag([0,1,0])
 two3 = pic.diag([0,0,1])
 
-
-Pi0 = pic.new_param('Pi0', pic.kron(zero2,zero3)+pic.kron(one2,one3)) # |00X00|+|10X10|
-Pi1 =  pic.new_param('Pi1', pic.kron(zero2,one3)+pic.kron(one2,two3))
-Pim1 = pic.new_param('Pim1', pic.kron(one2,zero3))
-Pi2 = pic.new_param('Pi2', pic.kron(zero2,two3))
-
-
+#Qutrit-qubit energy eigenspace projectors
+#TODO: find/write Python routine to automate this process
+Pi0 = pic.new_param('Pi0', pic.kron(zero2,zero3)+pic.kron(one2,one3)) # |00X00|+|11X11|
+Pi1 =  pic.new_param('Pi1', pic.kron(zero2,one3)+pic.kron(one2,two3)) # |01X01|+|12X12|
+Pim1 = pic.new_param('Pim1', pic.kron(one2,zero3)) # |10X10|
+Pi2 = pic.new_param('Pi2', pic.kron(zero2,two3)) # |02X02|
 
 ### def initial state rho ### 
 rho = pic.new_param('rho', np.ones((3,3))*(1/3))
@@ -97,7 +99,7 @@ def sig(theta, p):
 
 ###Generate some data### 
 threshold = 0.99999 # set threshold for f(rho,sig) <=1
-h = 1 # (h+1)^2 sigma points will be checked
+h = 20 # (h+1)^2 sigma points will be checked
 
 x1=[]
 z1=[]
