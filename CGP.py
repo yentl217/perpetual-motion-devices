@@ -4,8 +4,6 @@ Created on Sun Jan 19 19:41:12 2020
 @author: rheaa
 note need CVXOPT ver >=1.2.3 installed (\w 1.2.0 'hermitian' requirement seemed to fuck things up)
 """
-#Would be good to have some outputs on where in the program we are.
-#What's the number at the top of the graph?
 
 import numpy as np
 #from scipy import optimize
@@ -35,12 +33,15 @@ g0= g(E0)/(g(E0)+ g(E1))
 g1= g(E1)/(g(E0)+ g(E1))
 gibbs = pic.new_param('gibbs', np.array([[g0,0.],[0.,g1]])) 
 
-### dephasing map ###
+### G-twirling map on two qubits###
+#Note that we take the Hamiltonian of the reference system, H_R, is -H_B^T, where H_B is the Hamiltonian of the qubit transformed onto. 
+Pi0 = pic.new_param('Pi0', pic.kron(zero,zero)+pic.kron(one,one)) # |00X00|+|11X11|
+Pim1 = pic.new_param('Pim1', pic.kron(one,zero)) # |10X10|
+Pi1 = pic.new_param('Pi1', pic.kron(zero,one)) # |01X01|
 def dephase(M):
-    return pic.diag(pic.diag_vect(M)) 
+    return (Pi0*M*Pi0) + (Pi1*M*Pi1) + (Pim1*M*Pim1) 
 
 ### Gibbs-preserving covariant constraint fn ###
-#Note the Gibbs-twirling is incorrectly implemented in Gamma_GPC, as energy dephasing in the energy eigenbases of the individual systems! So Gamma_GPC doesn't work here.
 #This is the equation 123 version of the SDP
 def Gamma_GPC(a0,a1,a2,a3,rho1,gibbs1):
     return pic.kron(I,a1) - dephase(pic.kron(a2,rho1)) - pic.kron(a3,gibbs1) - a0
@@ -93,7 +94,7 @@ def sig(theta, p):
 ### def initial state rho ### 
 #Would be good to have this as program inputs
 ttt= 0.5
-prob= 0.8
+prob= 1.0
 rho = sig(ttt* np.pi, prob)
 
 ### Generate some data + comparison to L1 norm conditions (for qubits) ### 
@@ -106,7 +107,7 @@ n=[]
 
 threshold = 0.999 # set threshold for f(rho,sig) <=1
 h = 20  # (h+1)^2 sigma points will be checked
-m = 30  # no. of nec/suff conditions to check for L1 norm calc for each sigma point - ~300 is best
+m = 300  # no. of nec/suff conditions to check for L1 norm calc for each sigma point - ~300 is best
 for i in range(0,h+1):
     for j in range(0,h+1):
         t = np.pi * i/h
