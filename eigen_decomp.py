@@ -2,9 +2,9 @@ import numpy as np
 import picos as pic
 
 #qubit Hamiltonian
-H_1 = [1,2]
+H_1 = [0,1]
 #higher-dim system Hamiltonian
-H_2 = [1,2,3]
+H_2 = [0,1,2]
 #dimension of higher-dim system
 dim_2 = len(H_2)
 #total Hamiltonian
@@ -34,15 +34,15 @@ for i in range(len(H_total)):
     #begin constructing projector onto eigenspace with total energy e
         uniq_e.append(e)
         if test > -1: #involves excited state
-            projectors[e]=pic.kron(qutrit[test],qubit[1])
+            projectors[e]=pic.kron(qubit[1],qutrit[test])
         else: #involves ground state
-            projectors[e]=pic.kron(qutrit[i],qubit[0])
+            projectors[e]=pic.kron(,qubit[0],qutrit[i])
     else:
     #if projector unto state with total energy e already exists, expand that projector to include new state with the same total energy e
         if test > -1:
-            projectors[e]=projectors[e]+pic.kron(qutrit[test],qubit[1])
+            projectors[e]=projectors[e]+pic.kron(,qubit[1],qutrit[test])
         else:
-            projectors[e]=projectors[e]+pic.kron(qutrit[i],qubit[0])
+            projectors[e]=projectors[e]+pic.kron(qubit[0],qutrit[i])
 
 for key,value in projectors.items():
     print(key,value)

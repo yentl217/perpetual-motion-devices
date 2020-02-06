@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 Created on Sun Jan 19 19:41:12 2020
-
 @author: rheaa
 note need CVXOPT ver >=1.2.3 installed (\w 1.2.0 'hermitian' requirement seemed to fuck things up)
 """
@@ -39,7 +38,6 @@ Pi2 = pic.new_param('Pi2', pic.kron(zero2,two3)) # |02X02|
 ### def initial state rho ### 
 rho = pic.new_param('rho', np.ones((3,3))*(1/3))
 #rho = pic.diag([1/3,1/3,1/3])
-print(rho)
 
 ### def Gibbs state's (system 1=qutrit, sys 2=qubit) ### 
 b  = .5   # inverse temp
@@ -58,11 +56,9 @@ g2_0= g(E0)/(g(E0)+ g(E1))
 g2_1= g(E1)/(g(E0)+ g(E1))
 gamma2 = pic.new_param('gamma', np.array([[g2_0,0.],[0.,g2_1]])) 
 
-
 ### dephasing map in energy eigenbasis ###
 def dephase2(M):  # 2 qubits
     return (Pi0*M*Pi0) + (Pi1*M*Pi1) + (Pi2*M*Pi2) + (Pim1*M*Pim1) 
-
 
 def f(rho1,sig2,gam1,gam2,d2,cov=True):
     # rho -> sigma under GP (set cov=False)/ GPC map? Output \approx 1 --> yes, output<1 --> no.  
@@ -127,7 +123,7 @@ fig, ax1= plt.subplots(1, 1, figsize=(2,2))
 
 ax1.contour(XX,YY,F,0, colors='k', linewidths=0.5)
 sc=ax1.scatter(x1,z1,0.1,c=n1,alpha=1, cmap="coolwarm")
-ax1.plot(0, 2*g1_0-1, marker='o',  markersize=5, color='red')
+ax1.plot(0, 2*g2_0-1, marker='o',  markersize=5, color='red')
 ax1.tick_params(labelsize=14)
 
 
@@ -174,20 +170,12 @@ xx = np.linspace(-1.0, 1.0, 100)
 yy = np.linspace(-1.0, 1.0, 100)
 XX, YY = np.meshgrid(xx,yy)
 F = XX**2 + YY**2 - 1.0
-
 ### single plot ###
-
 fig=plt.figure(figsize=(7,5)) 
-
 ax = plt.subplot(1, 1, 1)
-
 ax.contour(XX,YY,F,0, colors='k', linewidths=0.5)
 sc=ax.scatter(x,z,1,c=n,alpha=1, cmap="coolwarm")
 ax.plot(np.sin(np.pi*theta)*(2*prob-1), np.cos(np.pi*theta)*(2*prob-1), marker='o',  markersize=5, color='black')
 ax.plot(0, 2*g0-1, marker='o',  markersize=5, color='gray')
-
-
 fig.savefig("CGP3_rho_" + "theta_"+ str(theta) + "_p_"+ str(prob)+ ".png", dpi=800)
-
-
 """
