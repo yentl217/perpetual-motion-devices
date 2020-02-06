@@ -1,2 +1,5 @@
 # Perpetual-Motion-Devices
-Python code for gibbs preserving covariant (GPC)/ gibbs preserving (GP) SDP calc on qubits (messy soz). Only works for GP so far. For GPC seems to only allow for final states that are incoherent :(
+CGP - qubit to qubit, note G-twirling not done correctly
+CGP_qutrit_to_qubit - qutrit to qubit
+CGP_qudit_to_qubit - qudit to qubit, first argument is dimension of qudit
+eigen_decomp - generates projectors for G-twirling
