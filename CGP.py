@@ -1,213 +1,185 @@
 # -*- coding: utf-8 -*-
 """
 Created on Sun Jan 19 19:41:12 2020
+
 @author: rheaa
 note need CVXOPT ver >=1.2.3 installed (\w 1.2.0 'hermitian' requirement seemed to fuck things up)
 """
-
 import numpy as np
-#from scipy import optimize
-#import scipy
-import picos as pic #SDP solver
+import picos as pic
 #import cvxopt as cvx
-#from pprint import pprint
 import matplotlib.pyplot as plt
 
-plus = pic.new_param('plus', np.array([[.5,.5],[.5,.5]]))    # |+X+|
-minus = pic.new_param('plus', np.array([[.5,-.5],[-.5,.5]])) # |-X-|
+
+ 
 zero = pic.new_param('zero', np.array([[1.,0.],[0.,0.]]))    # |0X0|
 one  = pic.new_param('one', np.array([[0.,0.],[0.,1.]]))     # |1X1|
-I = pic.new_param('I',np.eye(2))                             # id
+I2 = pic.new_param('I2', np.eye(2))                          # id_2
 X = pic.new_param('X', np.array([[0.,1.],[1.,0.]]))          # pauli X
 Z =  pic.new_param('Z', np.array([[1.,0.],[0.,-1.]]))        # pauli Z
-Y = pic.new_param('X', np.array([[0.,-1j],[1j,0.]]))         # pauli Y
+Y = pic.new_param('Y', np.array([[0.,-1j],[1j,0.]]))         # pauli Y
 
-### def Gibbs state ### 
-#previous labelled gamma; relabelled to gibbs to avoid confusion with Gamma map
-b = 1  # inverse temp
-E0 = 0
-E1 = 1 # energy level spacing
-def g(x):
-    return np.exp(-b * x)
-g0= g(E0)/(g(E0)+ g(E1))
-g1= g(E1)/(g(E0)+ g(E1))
-gibbs = pic.new_param('gibbs', np.array([[g0,0.],[0.,g1]])) 
 
-### G-twirling map on two qubits###
-#Note that we take the Hamiltonian of the reference system, H_R, is -H_B^T, where H_B is the Hamiltonian of the qubit transformed onto. 
-Pi0 = pic.new_param('Pi0', pic.kron(zero,zero)+pic.kron(one,one)) # |00X00|+|11X11|
-Pim1 = pic.new_param('Pim1', pic.kron(one,zero)) # |10X10|
-Pi1 = pic.new_param('Pi1', pic.kron(zero,one)) # |01X01|
-def dephase(M):
-    return (Pi0*M*Pi0) + (Pi1*M*Pi1) + (Pim1*M*Pim1) 
 
-### Gibbs-preserving covariant constraint fn ###
-#This is the equation 123 version of the SDP
-def Gamma_GPC(a0,a1,a2,a3,rho1,gibbs1):
-    return pic.kron(I,a1) - dephase(pic.kron(a2,rho1)) - pic.kron(a3,gibbs1) - a0
-### Gibbs-preserving constraint fn ###
-def Gamma_GP(a0,a1,a2,a3,rho1,gibbs1):
-    return pic.kron(I,a1) - pic.kron(a2,rho1) - pic.kron(a3,gibbs1) - a0
+def dephase(M,H1,H2):
+    ## dephase matrix M w.r.t. H_tot = id_d2 X H1 + HR X id_d1,
+    ## HR = -H2
+    ## H1, H2 lists of ordered energy eigenvalues of arb dim: low to high.
+    d1 = len(H1)
+    d2 = len(H2)
+    id_d1 = pic.new_param('id_d1', np.eye(d1))
+    id_d2 = pic.new_param('id_d2', np.eye(d2)) 
+    dim = d1*d2
+    HR = np.negative(H2)
+    H_tot = np.diag(np.matrix((pic.kron(id_d2,pic.diag(H1))+pic.kron(pic.diag(HR),id_d1)).value))
+    index = [np.argwhere(i==H_tot) for i in np.unique(H_tot)]
+    dephased = pic.diag(np.zeros(dim))
+    PVMs=[]
+    for i in range(len(index)):
+        a2 = np.zeros(dim)
+        a2[index[i]]=1
+        a2 = np.array(a2)
+        PVMs.append(pic.diag(a2))
+    for i in range(len(index)):
+        dephased += PVMs[i] * M * PVMs[i]
+    return dephased
 
-def f(rho1, sigma1):
-    """ rho -> sigma under GPC map? Output \approx 1 --> yes, output<1 --> no.  
-        dim(rho) = dim(sigma) =2 assumed """
-        
+
+
+def f(rho1,sig2,beta=1,H1=[0,1,2],H2=[0,1],cov=True,GP=True):
+    ##   rho -> sigma under CPTP/ GP/ GPC/ Cov map? 
+    ##   output \approx 1 --> yes, output < 1 --> no.  
+    ##   dim(rho1) = dim(H1) = d1
+    ##   dim(sig2) = dim(H2) = d2
+    ##   default: qutrit-qubit CPG, equally-spaced energy levels, inv.temp=1
+    d1 = len(H1)
+    d2 = len(H2)
+    id_d2 =pic.new_param('id_d2',np.eye(d2)) 
+
     ## def problem & variables ##
-    p = pic.Problem()  
-    # this is the zeta vector
-    X0 = p.add_variable('X0', (4,4), 'hermitian') #eta
-    X1 = p.add_variable('X1', (2,2), 'hermitian') #Z
-    X2 = p.add_variable('X2', (2,2), 'hermitian') #rho 
-    X3 = p.add_variable('X3', (2,2), 'hermitian') #gibbs
+    p = pic.Problem()   
+    X1 = p.add_variable('X1', (d1,d1), 'hermitian') 
+    X2 = p.add_variable('X2', (d2,d2), 'hermitian')
+    X3 = p.add_variable('X3', (d2,d2), 'hermitian')
     
-    ## constraints ##
-    paulis = [I,X,Y,Z] 
-    # this is the constraint Gamma(zeta) = 0; must also be doable just by setting each matrix element to 0...
-    for i in range(4):
-        for k in range(4):
-            basis_ik = pic.kron(paulis[i], paulis[k])
-            p.add_constraint(pic.trace(basis_ik*Gamma_GPC(X0,X1,X2,X3,rho1,gibbs))==0)
-   ### equivalently, can get rid of X0 variable and just use the following (removing dephase for GP): 
-   #p.add_constraint(pic.kron(id_d, X1) - dephase(pic.kron(X2, rho)) - pic.kron(X3, gibbs) >> 0. ) but this is much slower.
-   #constraint on the positivity of eta
-    p.add_constraint(X0 >> 0) 
+    ## Gibbs-state:
+    def g(x):
+        return np.exp(-beta * x)
+    exp_array1 = np.array(list(map(g,H1)))   
+    exp_array2 = np.array(list(map(g,H2)))
+    gam1 = pic.diag(np.true_divide(exp_array1, np.sum(exp_array1)))
+    gam2 = pic.diag(np.true_divide(exp_array2, np.sum(exp_array2)))
+    #g2_0 = gam2[0].value
+    
+    ### constraints ### 
+    if GP == False: 
+        p.add_constraint((sig2|X2)==1) 
+        if cov == True:
+            p.add_constraint(pic.kron(id_d2, X1) - dephase(pic.kron(X2, rho1),H1,H2) >> 0. )         
+        else:
+            p.add_constraint(pic.kron(id_d2, X1) - pic.kron(X2, rho1)  >> 0. )     
+    else:
+        p.add_constraint((sig2|X2)+(gam2|X3)==1) 
+        p.add_constraint(X3 >> 0)
+        if cov == True:
+            p.add_constraint(pic.kron(id_d2, X1) - dephase(pic.kron(X2, rho1),H1,H2) - pic.kron(X3, gam1) >> 0. )         
+        else:
+            p.add_constraint(pic.kron(id_d2, X1) - pic.kron(X2, rho1) - pic.kron(X3, gam1) >> 0. )     
     p.add_constraint(X1 >> 0) 
     p.add_constraint(X2 >> 0) 
-    p.add_constraint(X3 >> 0) 
-   #Tr(sigma zeta) = 1
-    p.add_constraint((sigma1|X2)+(gibbs|X3)==1) 
-    ## objective fn & solve ## 
+      
+    ### objective fn & solve ### 
     p.set_objective('min', pic.trace(X1))
     p.solve(verbose = 0,solver = 'cvxopt')   
     return p.obj_value().real
 
-def sig(theta, p):
-    """ sig(theta,p) = p |thetaXtheta| + (1-p) |theta_barXtheta_bar|
-        |theta> = cos theta/2 |0> + sin theta/2 |1>, <theta|theta_bar>=0"""
-    #Why's this bit necessary?
-    if abs(theta - np.pi)< 0.000000001:
-        return 0.5 * (I - (2*p-1)*Z)
-    else:
-        return 0.5 * (I + np.cos(theta)*(2*p-1)*Z + np.sin(theta)*(2*p-1)*X)
+def qubit_XZ(theta, p):
+    ## qubit_XZ(t,p) = p |tXt| + (1-p) |t_barXt_bar|
+    ## |t> = cos t/2 |0> + sin t/2 |1>, <t|t_bar>=0
+    return 0.5 * (I2 + np.cos(theta)*(2*p-1)*Z + np.sin(theta)*(2*p-1)*X)
+
+### Generate some data ### 
+threshold = 0.9999 # set threshold for f(rho,sig) <=1
+h = 50 # (h+1)^2 sigma points will be checked
+
+x1=[]
+z1=[]
+n1=[]
 
 ### def initial state rho ### 
-#Would be good to have this as program inputs
-ttt= 0.5
-prob= 1.0
-rho = sig(ttt* np.pi, prob)
+#prob=0.75
+#theta=0.50 
+#rho =  qubit_XZ(theta*np.pi, prob)
+rho = pic.new_param('rho', np.ones((3,3))*(1/3))
 
-### Generate some data + comparison to L1 norm conditions (for qubits) ### 
-x1 = []
-z1=[]
-l1=[]
-x=[]
-z=[]
-n=[]
-
-threshold = 0.999 # set threshold for f(rho,sig) <=1
-h = 20  # (h+1)^2 sigma points will be checked
-m = 300  # no. of nec/suff conditions to check for L1 norm calc for each sigma point - ~300 is best
+E1 = [0,1,10]
+E2 = [0,1]
+Cov = True
+Gp  =  False
+beta = 0.5
 for i in range(0,h+1):
+    print(i)
     for j in range(0,h+1):
         t = np.pi * i/h
         p = j / h
-        t_list=[]
-        for q in range(1,m+1):
-            PP = np.matrix(((q/m)*rho-(1-(q/m))*gibbs).value)
-            QQ = np.matrix(((q/m)*sig(t,p)-(1-(q/m))*gibbs).value)
-            L1_rho_gam = sum(np.linalg.svd(PP)[1])  #L1-norm of p1 rho - p2 gibbs
-            L1_sig_gam = sum(np.linalg.svd(QQ)[1])  #L1-norm of p1 sig - p2 gibbs
-            t_list.append(L1_rho_gam/L1_sig_gam)
-        #should the L_1 norm threshold here be different frm the f(rho,sig) one?
-        if all(i >= 0.999999 for i in t_list):
+        if f(rho, qubit_XZ(t,p),beta,E1,E2,Cov,Gp) >= threshold:  
             x1.append(np.sin(t)*(2*p-1))
             z1.append(np.cos(t)*(2*p-1))
-            l1.append(1.0) #what does this do? I suspect there is = if conversion is possible...   
-        if f(rho, sig(t,p)) >= threshold:  
-            x.append(np.sin(t)*(2*p-1))
-            z.append(np.cos(t)*(2*p-1))
-            n.append(f(rho, sig(t,p)))
+            n1.append(1.) #n1.append(f(rho, sig(t,p),gamma_1))
+
 
 ### plot results ###
-
-#sets up grid plot
 xx = np.linspace(-1.0, 1.0, 100)
 yy = np.linspace(-1.0, 1.0, 100)
 XX, YY = np.meshgrid(xx,yy)
-#This defines X-Z circle of Bloch sphere
 F = XX**2 + YY**2 - 1.0
 
 fig = plt.figure()  
-fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, sharex=True, figsize=(5.8,2))
+fig, ax1= plt.subplots(1, 1, figsize=(4,4))
 
-#Draws X-Z cirle of Bloch sphere
 ax1.contour(XX,YY,F,0, colors='k', linewidths=0.5)
-#Plots accessible sigma according to analytic solution
-ax1.scatter(x1,z1,1,c=l1,alpha=1, cmap="coolwarm")
-#plots initial state
-ax1.plot(np.sin(np.pi*ttt)*(2*prob-1), np.cos(np.pi*ttt)*(2*prob-1), marker='o',  markersize=5, color='black')
-#plots Gibbs state
-ax1.plot(0, 2*g0-1, marker='o',  markersize=5, color='gray')
+sc=ax1.scatter(x1,z1,0.1,c=n1,alpha=1, cmap="coolwarm")
+#ax1.plot(np.sin(np.pi*theta)*(2*prob-1), np.cos(np.pi*theta)*(2*prob-1), marker='o',  markersize=5, color='black')
 
-#Draws X-Z circle of Bloch sphere
-ax2.contour(XX,YY,F,0, colors='k', linewidths=0.5)
-#Plots accessible sigma according to SDP
-sc=ax2.scatter(x,z,1,c=n,alpha=1, cmap="coolwarm")
-#Plots initial state
-ax2.plot(np.sin(np.pi*ttt)*(2*prob-1), np.cos(np.pi*ttt)*(2*prob-1), marker='o',  markersize=5, color='black')
-#Plots Gibbs state
-ax2.plot(0, 2*g0-1, marker='o',  markersize=5, color='gray')
+## Gibbs-state:
+def g(x):
+    return np.exp(-beta * x) 
+exp_array2 = np.array(list(map(g,E2)))
+gam2 = pic.diag(np.true_divide(exp_array2, np.sum(exp_array2)))
+g2_0 = gam2[0].value
+ax1.plot(0, 2*g2_0-1, marker='o',  markersize=5, color='red')
+ax1.tick_params(labelsize=14)
 
 # get rid of top/right border 
 ax1.spines['top'].set_visible(False)
 ax1.spines['right'].set_visible(False)
-ax2.spines['top'].set_visible(False)
-ax2.spines['right'].set_visible(False)
+
 
 # extra spacing in between plots 
-fig.subplots_adjust(wspace=0.7)
+#fig.subplots_adjust(wspace=0.7)
 
 # axis labels/ coords
-ax1.set_xlabel(r'$X$',fontsize = 15)
-ax1.set_ylabel(r'$Z$',rotation=0,fontsize = 15)
+ax1.set_xlabel(r'$X$',fontsize = 16)
+ax1.set_ylabel(r'$Z$',rotation=0,fontsize = 16)
 ax1.xaxis.set_label_coords(1.08, 0.05)
 ax1.yaxis.set_label_coords(0.01, 1.03)
-
-ax2.set_xlabel(r'$X$',fontsize = 15)
-ax2.set_ylabel(r'$Z$',rotation=0,fontsize = 15)
-ax2.xaxis.set_label_coords(1.08, 0.05)
-ax2.yaxis.set_label_coords(0.01, 1.03)
+ax1.yaxis.set_ticks(np.array([-1,-0.5, 0,0.5, 1]))
+ax1.set_yticklabels(np.array(["-1"," ","0"," ","1"]),fontsize=14)
+ax1.xaxis.set_ticks(np.array([-1,-0.5, 0,0.5, 1]))
+ax1.set_xticklabels(np.array(["-1"," ","0"," ","1"]),fontsize=14)
 
 axes = plt.gca()
 axes.set_xlim([-1.25,1.25])
 axes.set_ylim([-1.25,1.25])
 
+
 # colourbar 
-fig.subplots_adjust(right=0.79,bottom=0.2)
-cbar_ax = fig.add_axes([0.85, 0.2, 0.023, 0.67])
-cbar = fig.colorbar(sc, cax=cbar_ax)
-cbar.ax.set_title('$f( \\rho, \\sigma )$',fontsize=15)
+fig.subplots_adjust(left=0.2, bottom=0.2, right=0.8, top=0.8, wspace=0, hspace=0)
+#cbar_ax = fig.add_axes([0.6, 0.2, 0.05, 0.67])
+#cbar = fig.colorbar(sc, cax=cbar_ax)
+#cbar.ax.set_title('$f( \\rho, \\sigma )$',fontsize=15)
 
 
-fig.savefig("CGP3_rho_" + "theta_"+ str(ttt) + "_p_"+ str(prob)+ ".png", dpi=800)
+fig.savefig('dim_' + str(len(E1)) +'_to_' +str(len(E2))+ '_H1_' + str(E1) + '_threshold_' + str(threshold) + '_beta_' +str(beta)+ '_cov_' +str(Cov) + '_GP_' +str(Gp) +'.png', dpi=800)
 
-"""
-### single plot ###
-fig=plt.figure(figsize=(7,5)) 
-plt.scatter(x,z,1,c=n,alpha=4, cmap="coolwarm")
-plt.colorbar();
-plt.plot(2*q-1, 0, marker='o',  markersize=5, color='black')
-plt.plot(0, 2*g1-1, marker='o',  markersize=5, color='black')
-ax = plt.subplot(1, 1, 1)
-fig.savefig("bloch.png", dpi=800)
-np.savetxt('data_bloch.out', (x,z,n)) 
-np.savetxt('data_bloch_l1.out', (x1,z1,l1)) 
-fig=plt.figure(figsize=(7,5)) 
-plt.scatter(x1,z1,1,c=l1,alpha=3, cmap="coolwarm")
-plt.colorbar();
-plt.plot(2*q-1, 0, marker='o',  markersize=5, color='black')
-plt.plot(0, 2*g1-1, marker='o',  markersize=5, color='black')
-ax = plt.subplot(1, 1, 1)
-fig.savefig("bloch_l1.png", dpi=800)
-"""
+np.savetxt('dim_' + str(len(E1)) +'_to_' +str(len(E2))+ '_H1_' + str(E1) +  '_threshold_' + str(threshold) + '_beta_' +str(beta)+ '_cov_' +str(Cov) + '_GP_' +str(Gp) + '.out', (x1,z1,n1))
