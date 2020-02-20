@@ -9,17 +9,14 @@ import numpy as np
 import picos as pic
 #import cvxopt as cvx
 import matplotlib.pyplot as plt
+import math
 
-
- 
 zero = pic.new_param('zero', np.array([[1.,0.],[0.,0.]]))    # |0X0|
 one  = pic.new_param('one', np.array([[0.,0.],[0.,1.]]))     # |1X1|
 I2 = pic.new_param('I2', np.eye(2))                          # id_2
 X = pic.new_param('X', np.array([[0.,1.],[1.,0.]]))          # pauli X
 Z =  pic.new_param('Z', np.array([[1.,0.],[0.,-1.]]))        # pauli Z
 Y = pic.new_param('Y', np.array([[0.,-1j],[1j,0.]]))         # pauli Y
-
-
 
 def dephase(M,H1,H2):
     ## dephase matrix M w.r.t. H_tot = id_d2 X H1 + HR X id_d1,
@@ -100,11 +97,12 @@ def qubit_XZ(theta, p):
 
 ### Generate some data ### 
 threshold = 0.9999 # set threshold for f(rho,sig) <=1
-h = 50 # (h+1)^2 sigma points will be checked
+h = 200 # (h+1)^2 sigma points will be checked
 
 x1=[]
 z1=[]
 n1=[]
+fitting=[]
 
 ### def initial state rho ### 
 #prob=0.75
@@ -112,7 +110,7 @@ n1=[]
 #rho =  qubit_XZ(theta*np.pi, prob)
 rho = pic.new_param('rho', np.ones((3,3))*(1/3))
 
-E1 = [0,1,10]
+E1 = [0,1,5]
 E2 = [0,1]
 Cov = True
 Gp  =  False
@@ -122,11 +120,17 @@ for i in range(0,h+1):
     for j in range(0,h+1):
         t = np.pi * i/h
         p = j / h
-        if f(rho, qubit_XZ(t,p),beta,E1,E2,Cov,Gp) >= threshold:  
+        if f(rho, qubit_XZ(t,p),beta,E1,E2,Cov,Gp) >= threshold: 
             x1.append(np.sin(t)*(2*p-1))
-            z1.append(np.cos(t)*(2*p-1))
+            r_z = np.cos(t)*(2*p-1)
+            z1.append(r_z)
             n1.append(1.) #n1.append(f(rho, sig(t,p),gamma_1))
-
+            if r_z < -1/3:
+                fitting.append(2*math.sqrt((1+r_z)/6))
+            elif r_z < 1/3:
+                fitting.append(2/3)
+            else:
+                fitting.append(2*math.sqrt((1-r_z)/6))
 
 ### plot results ###
 xx = np.linspace(-1.0, 1.0, 100)
@@ -139,6 +143,7 @@ fig, ax1= plt.subplots(1, 1, figsize=(4,4))
 
 ax1.contour(XX,YY,F,0, colors='k', linewidths=0.5)
 sc=ax1.scatter(x1,z1,0.1,c=n1,alpha=1, cmap="coolwarm")
+ax1.scatter(fitting,z1,0.1,c='black',alpha=1)
 #ax1.plot(np.sin(np.pi*theta)*(2*prob-1), np.cos(np.pi*theta)*(2*prob-1), marker='o',  markersize=5, color='black')
 
 ## Gibbs-state:
