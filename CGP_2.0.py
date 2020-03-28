@@ -94,7 +94,7 @@ def f(rho1,sig2,beta,cov=True,GP=True):
         p.add_constraint((sig2|X2)+(gam2|X3)==1) 
         p.add_constraint(X3 >> 0)
         if cov == True:
-            p.add_constraint(pic.kron(id_d2, X1) - dephase_H(pic.kron(X2, rho1)) - pic.kron(X3, gam1) >> 0. )         
+            p.add_constraint(pic.kron(id_d2, X1) - dephase_H(pic.kron(X2, rho1)) - dephase_H(pic.kron(X3, gam1)) >> 0. )         
         else:
             p.add_constraint(pic.kron(id_d2, X1) - pic.kron(X2, rho1) - pic.kron(X3, gam1) >> 0. )     
     p.add_constraint(X1 >> 0) 
